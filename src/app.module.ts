@@ -6,7 +6,10 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { User } from './entities/user.entity';
 import { Message } from './entities/message.entity';
+import { Conversation } from './entities/conversation.entity';
+import { ConversationMember } from './entities/conversation-member.entity';
 import { ChatGateway } from './chat.gateway';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -16,10 +19,11 @@ import { ChatGateway } from './chat.gateway';
     TypeOrmModule.forRoot({
       type: 'sqlite',
       database: 'messaging.db',
-      entities: [User, Message],
+      entities: [User, Message, Conversation, ConversationMember],
       synchronize: true,
     }),
-    TypeOrmModule.forFeature([User, Message]),
+    TypeOrmModule.forFeature([User, Message, Conversation, ConversationMember]),
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [AppService, ChatGateway],
