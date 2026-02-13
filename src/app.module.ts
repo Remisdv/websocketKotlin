@@ -9,6 +9,7 @@ import { Message } from './entities/message.entity';
 import { Conversation } from './entities/conversation.entity';
 import { ConversationMember } from './entities/conversation-member.entity';
 import { ChatGateway } from './chat.gateway';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { ChatGateway } from './chat.gateway';
       synchronize: true,
     }),
     TypeOrmModule.forFeature([User, Message, Conversation, ConversationMember]),
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [AppService, ChatGateway],

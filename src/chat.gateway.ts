@@ -10,14 +10,11 @@ import {
 import { Server, Socket } from 'socket.io';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, IsNull } from 'typeorm';
+import { JwtService } from '@nestjs/jwt';
 import { Message } from './entities/message.entity';
 import { User } from './entities/user.entity';
 import { Conversation, ConversationType } from './entities/conversation.entity';
 import { ConversationMember } from './entities/conversation-member.entity';
-
-interface JoinPayload {
-  username: string;
-}
 
 interface SendMessagePayload {
   content: string;
@@ -57,10 +54,68 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private conversationRepository: Repository<Conversation>,
     @InjectRepository(ConversationMember)
     private conversationMemberRepository: Repository<ConversationMember>,
+    private jwtService: JwtService,
   ) {}
+async handleConnection(client: Socket) {
+    try {
+      const token =
+        client.handshake?.auth?.token ||
+        client.handshake?.headers?.authorization?.split(' ')[1];
 
-  handleConnection(client: Socket) {
-    console.log(`Client connected: ${client.id}`);
+      if (!token) {
+        console.log('Client connected without token, disconnecting...');
+        client.disconnect();
+        return;
+      }
+
+      const payload = this.jwtService.verify(token as string, {
+        secret:
+          process.env.JWT_SECRET || 'your-secret-key-change-in-production',
+      }) as { sub: number; username: string };
+
+      const user = await this.userRepository.findOne({
+        where: { id: payload.sub },
+      });
+      
+      if (!user) {
+        console.log('User not found, disconnecting...');
+        client.disconnect();
+        return;
+      }
+
+      client['user'] = user;
+      this.connectedUsers.set(client.id, user);
+
+      // Récupérer les derniers messages globaux (sans conversation)
+      const messages = await this.messageRepository.find({
+        relations: ['sender'],
+        where: { conversation: IsNull() },
+        order: { sentAt: 'ASC' },
+        take: 50,
+      });
+
+      // Envoyer l'historique au client
+      client.emit(
+        'messageHistory',
+        messages.map((msg) => ({
+          id: msg.id,
+          content: msg.content,
+          sender: msg.sender.username,
+          sentAt: msg.sentAt.toISOString(),
+        })),
+      );
+
+      // Notifier tous les utilisateurs de la nouvelle connexion
+      this.server.emit('userJoined', {
+        username: user.username,
+        timestamp: new Date().toISOString(),
+      });
+
+      console.log(`User ${user.username} connected with JWT`);
+    } catch (error: any) {
+      console.log('Invalid token, disconnecting...', error?.message || error);
+      client.disconnect();
+    }
   }
 
   handleDisconnect(client: Socket) {
@@ -75,62 +130,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  @SubscribeMessage('join')
-  async handleJoin(
-    @MessageBody() payload: JoinPayload,
-    @ConnectedSocket() client: Socket,
-  ) {
-    const { username } = payload;
-
-    // Chercher ou créer l'utilisateur
-    let user = await this.userRepository.findOne({ where: { username } });
-    if (!user) {
-      user = this.userRepository.create({ username });
-      await this.userRepository.save(user);
-    }
-
-    this.connectedUsers.set(client.id, user);
-
-    // Récupérer les derniers messages globaux (sans conversation)
-    const messages = await this.messageRepository.find({
-      relations: ['sender'],
-      where: { conversation: IsNull() },
-      order: { sentAt: 'ASC' },
-      take: 50,
-    });
-
-    // Envoyer l'historique au client qui vient de se connecter
-    client.emit(
-      'messageHistory',
-      messages.map((msg) => ({
-        id: msg.id,
-        content: msg.content,
-        sender: msg.sender.username,
-        sentAt: msg.sentAt.toISOString(),
-      })),
-    );
-
-    // Notifier tous les utilisateurs de la nouvelle connexion
-    this.server.emit('userJoined', {
-      username: user.username,
-      timestamp: new Date().toISOString(),
-    });
-
-    console.log(`User ${username} joined`);
-
-    return { success: true, username: user.username };
-  }
-
   @SubscribeMessage('sendMessage')
   async handleMessage(
     @MessageBody() payload: SendMessagePayload,
     @ConnectedSocket() client: Socket,
   ) {
-    const user = this.connectedUsers.get(client.id);
+    const user = client['user'] as User;
     if (!user) {
       return {
         success: false,
-        error: 'User not authenticated. Please join first.',
+        error: 'User not authenticated.',
       };
     }
 
@@ -172,11 +181,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: CreatePrivateConversationPayload,
     @ConnectedSocket() client: Socket,
   ) {
-    const user = this.connectedUsers.get(client.id);
+    const user = client['user'] as User;
     if (!user) {
       return {
         success: false,
-        error: 'User not authenticated. Please join first.',
+        error: 'User not authenticated.',
       };
     }
 
@@ -272,11 +281,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: CreateGroupConversationPayload,
     @ConnectedSocket() client: Socket,
   ) {
-    const user = this.connectedUsers.get(client.id);
+    const user = client['user'] as User;
     if (!user) {
       return {
         success: false,
-        error: 'User not authenticated. Please join first.',
+        error: 'User not authenticated.',
       };
     }
 
@@ -333,11 +342,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: SendMessageToConversationPayload,
     @ConnectedSocket() client: Socket,
   ) {
-    const user = this.connectedUsers.get(client.id);
+    const user = client['user'] as User;
     if (!user) {
       return {
         success: false,
-        error: 'User not authenticated. Please join first.',
+        error: 'User not authenticated.',
       };
     }
 
@@ -402,11 +411,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('getConversations')
   async handleGetConversations(@ConnectedSocket() client: Socket) {
-    const user = this.connectedUsers.get(client.id);
+    const user = client['user'] as User;
     if (!user) {
       return {
         success: false,
-        error: 'User not authenticated. Please join first.',
+        error: 'User not authenticated.',
       };
     }
 
@@ -471,11 +480,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: { conversationId: number },
     @ConnectedSocket() client: Socket,
   ) {
-    const user = this.connectedUsers.get(client.id);
+    const user = client['user'] as User;
     if (!user) {
       return {
         success: false,
-        error: 'User not authenticated. Please join first.',
+        error: 'User not authenticated.',
       };
     }
 
