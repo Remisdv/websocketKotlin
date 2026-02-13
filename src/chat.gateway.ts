@@ -56,8 +56,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private conversationMemberRepository: Repository<ConversationMember>,
     private jwtService: JwtService,
   ) {}
-async handleConnection(client: Socket) {
+
+  async handleConnection(client: Socket) {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const token =
         client.handshake?.auth?.token ||
         client.handshake?.headers?.authorization?.split(' ')[1];
@@ -68,7 +70,7 @@ async handleConnection(client: Socket) {
         return;
       }
 
-      const payload = this.jwtService.verify(token as string, {
+      const payload = this.jwtService.verify(token, {
         secret:
           process.env.JWT_SECRET || 'your-secret-key-change-in-production',
       }) as { sub: number; username: string };
@@ -76,7 +78,7 @@ async handleConnection(client: Socket) {
       const user = await this.userRepository.findOne({
         where: { id: payload.sub },
       });
-      
+
       if (!user) {
         console.log('User not found, disconnecting...');
         client.disconnect();
@@ -112,8 +114,9 @@ async handleConnection(client: Socket) {
       });
 
       console.log(`User ${user.username} connected with JWT`);
-    } catch (error: any) {
-      console.log('Invalid token, disconnecting...', error?.message || error);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log('Invalid token, disconnecting...', message);
       client.disconnect();
     }
   }

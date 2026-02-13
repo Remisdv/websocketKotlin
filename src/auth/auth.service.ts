@@ -18,7 +18,7 @@ export class AuthService {
     const existingUser = await this.userRepository.findOne({
       where: { username },
     });
-    
+
     if (existingUser) {
       throw new UnauthorizedException('Username already exists');
     }
@@ -62,7 +62,7 @@ export class AuthService {
 
     // Vérifier le mot de passe
     const isPasswordValid = await bcrypt.compare(password, user.password || '');
-    
+
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
