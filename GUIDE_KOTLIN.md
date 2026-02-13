@@ -134,11 +134,13 @@ class AuthService(baseUrl: String) {
 
 ---
 
-## 🔌 Étape 4 : WebSocket avec JWT
+## 🔌 Étape 4 : WebSocket avec JWT et Conversations
 
 ### Modifiez `services/ChatSocketService.kt` :
 
-**Changement clé** : Ajouter le token JWT lors de la connexion
+**Changements clés** : 
+- Ajouter le token JWT lors de la connexion
+- Gérer les conversations en temps réel
 
 ```kotlin
 package com.votreapp.services
@@ -146,15 +148,31 @@ package com.votreapp.services
 import io.socket.client.IO
 import io.socket.client.Socket
 import android.util.Log
+import com.google.gson.Gson
+import com.votreapp.models.Message
+import com.votreapp.models.Conversation
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import org.json.JSONObject
+import org.json.JSONArray
 
 class ChatSocketService(private val serverUrl: String) {
     private var socket: Socket? = null
+    private val gson = Gson()
     
-    // ⚠️ Changement important : Connexion avec token
+    private val _messages = MutableStateFlow<List<Message>>(emptyList())
+    val messages: StateFlow<List<Message>> = _messages
+    
+    private val _conversations = MutableStateFlow<List<Conversation>>(emptyList())
+    val conversations: StateFlow<List<Conversation>> = _conversations
+    
+    private val _isConnected = MutableStateFlow(false)
+    val isConnected: StateFlow<Boolean> = _isConnected
+    
+    // 🔑 Connexion avec token JWT
     fun connect(jwtToken: String) {
         try {
             val options = IO.Options().apply {
-                // 🔑 Passer le token JWT ici
                 auth = mapOf("token" to jwtToken)
                 reconnection = true
                 reconnectionDelay = 1000
@@ -165,21 +183,88 @@ class ChatSocketService(private val serverUrl: String) {
             
             socket?.on(Socket.EVENT_CONNECT) {
                 Log.d("ChatSocket", "Connected with JWT")
+                _isConnected.value = true
+                // Charger les conversations automatiquement
+                getConversations()
+            }
+            
+            socket?.on(Socket.EVENT_DISCONNECT) {
+                Log.d("ChatSocket", "Disconnected")
+                _isConnected.value = false
             }
             
             socket?.on(Socket.EVENT_CONNECT_ERROR) { args ->
                 Log.e("ChatSocket", "Connection error: ${args[0]}")
+                _isConnected.value = false
             }
             
-            // Les événements existants restent les mêmes
-            socket?.on("messageHistory") { /* ... */ }
-            socket?.on("newMessage") { /* ... */ }
-            socket?.on("userJoined") { /* ... */ }
-            socket?.on("userLeft") { /* ... */ }
+            // Messages globaux
+            socket?.on("messageHistory") { args ->
+                try {
+                    val messagesArray = args[0] as JSONArray
+                    val messagesList = mutableListOf<Message>()
+                    for (i in 0 until messagesArray.length()) {
+                        val msgJson = messagesArray.getJSONObject(i).toString()
+                        val message = gson.fromJson(msgJson, Message::class.java)
+                        messagesList.add(message)
+                    }
+                    _messages.value = messagesList
+                    Log.d("ChatSocket", "Received ${messagesList.size} messages")
+                } catch (e: Exception) {
+                    Log.e("ChatSocket", "Error parsing message history", e)
+                }
+            }
+            
+            socket?.on("newMessage") { args ->
+                try {
+                    val messageJson = args[0].toString()
+                    val message = gson.fromJson(messageJson, Message::class.java)
+                    _messages.value = _messages.value + message
+                    Log.d("ChatSocket", "New message: ${message.content}")
+                } catch (e: Exception) {
+                    Log.e("ChatSocket", "Error parsing new message", e)
+                }
+            }
+            
+            // 🆕 Événement pour les nouvelles conversations en temps réel
+            socket?.on("newConversation") { args ->
+                try {
+                    val convJson = args[0].toString()
+                    val conversation = gson.fromJson(convJson, Conversation::class.java)
+                    _conversations.value = listOf(conversation) + _conversations.value
+                    Log.d("ChatSocket", "New conversation: ${conversation.name}")
+                } catch (e: Exception) {
+                    Log.e("ChatSocket", "Error parsing new conversation", e)
+                }
+            }
+            
+            // Messages de conversation
+            socket?.on("newConversationMessage") { /* gérer selon vos besoins */ }
+            
+            // Utilisateurs
+            socket?.on("userJoined") { args ->
+                try {
+                    val data = args[0] as JSONObject
+                    val username = data.getString("username")
+                    Log.d("ChatSocket", "User joined: $username")
+                } catch (e: Exception) {
+                    Log.e("ChatSocket", "Error parsing userJoined", e)
+                }
+            }
+            
+            socket?.on("userLeft") { args ->
+                try {
+                    val data = args[0] as JSONObject
+                    val username = data.getString("username")
+                    Log.d("ChatSocket", "User left: $username")
+                } catch (e: Exception) {
+                    Log.e("ChatSocket", "Error parsing userLeft", e)
+                }
+            }
             
             socket?.connect()
         } catch (e: Exception) {
-            Log.e("ChatSocket", "Error", e)
+            Log.e("ChatSocket", "Error connecting", e)
         }
     }
     
@@ -189,7 +274,134 @@ class ChatSocketService(private val serverUrl: String) {
         socket = null
     }
     
-    // Plus besoin de l'événement 'join' - authentification automatique via JWT
+    // 🆕 Charger les conversations
+    fun getConversations() {
+        socket?.emit("getConversations") { args ->
+            try {
+                val response = args[0] as JSONObject
+                val success = response.getBoolean("success")
+                if (success) {
+                    val convsArray = response.getJSONArray("conversations")
+                    val convsList = mutableListOf<Conversation>()
+                    for (i in 0 until convsArray.length()) {
+                        val convJson = convsArray.getJSONObject(i).toString()
+                        val conv = gson.fromJson(convJson, Conversation::class.java)
+                        convsList.add(conv)
+                    }
+                    _conversations.value = convsList
+                    Log.d("ChatSocket", "Loaded ${convsList.size} conversations")
+                }
+            } catch (e: Exception) {
+                Log.e("ChatSocket", "Error loading conversations", e)
+            }
+        }
+    }
+    
+    // 🆕 Créer une conversation privée
+    fun createPrivateConversation(
+        recipientUsername: String,
+        callback: ((Boolean, Conversation?) -> Unit)? = null
+    ) {
+        val payload = JSONObject().apply {
+            put("recipientUsername", recipientUsername)
+        }
+        
+        socket?.emit("createPrivateConversation", payload) { args ->
+            try {
+                val response = args[0] as JSONObject
+                val success = response.getBoolean("success")
+                if (success) {
+                    val convJson = response.getJSONObject("conversation").toString()
+                    val conversation = gson.fromJson(convJson, Conversation::class.java)
+                    
+                    // Ajouter à la liste si c'est une nouvelle conversation
+                    if (!response.has("message") || response.getString("message") != "Conversation already exists") {
+                        _conversations.value = listOf(conversation) + _conversations.value
+                    }
+                    
+                    callback?.invoke(true, conversation)
+                } else {
+                    callback?.invoke(false, null)
+                }
+            } catch (e: Exception) {
+                Log.e("ChatSocket", "Error creating private conversation", e)
+                callback?.invoke(false, null)
+            }
+        }
+    }
+    
+    // 🆕 Créer une conversation de groupe
+    fun createGroupConversation(
+        name: String,
+        memberUsernames: List<String>,
+        callback: ((Boolean, Conversation?) -> Unit)? = null
+    ) {
+        val payload = JSONObject().apply {
+            put("name", name)
+            put("memberUsernames", JSONArray(memberUsernames))
+        }
+        
+        socket?.emit("createGroupConversation", payload) { args ->
+            try {
+                val response = args[0] as JSONObject
+                val success = response.getBoolean("success")
+                if (success) {
+                    val convJson = response.getJSONObject("conversation").toString()
+                    val conversation = gson.fromJson(convJson, Conversation::class.java)
+                    _conversations.value = listOf(conversation) + _conversations.value
+                    callback?.invoke(true, conversation)
+                } else {
+                    callback?.invoke(false, null)
+                }
+            } catch (e: Exception) {
+                Log.e("ChatSocket", "Error creating group conversation", e)
+                callback?.invoke(false, null)
+            }
+        }
+    }
+    
+    // Envoyer un message global
+    fun sendMessage(content: String, callback: ((Boolean, String?) -> Unit)? = null) {
+        val payload = JSONObject().apply {
+            put("content", content)
+        }
+        
+        socket?.emit("sendMessage", payload) { args ->
+            try {
+                val response = args[0] as JSONObject
+                val success = response.getBoolean("success")
+                val error = if (response.has("error")) response.getString("error") else null
+                callback?.invoke(success, error)
+            } catch (e: Exception) {
+                Log.e("ChatSocket", "Error sending message", e)
+                callback?.invoke(false, e.message)
+            }
+        }
+    }
+    
+    // 🆕 Envoyer un message dans une conversation
+    fun sendMessageToConversation(
+        conversationId: Int,
+        content: String,
+        callback: ((Boolean, String?) -> Unit)? = null
+    ) {
+        val payload = JSONObject().apply {
+            put("conversationId", conversationId)
+            put("content", content)
+        }
+        
+        socket?.emit("sendMessageToConversation", payload) { args ->
+            try {
+                val response = args[0] as JSONObject
+                val success = response.getBoolean("success")
+                val error = if (response.has("error")) response.getString("error") else null
+                callback?.invoke(success, error)
+            } catch (e: Exception) {
+                Log.e("ChatSocket", "Error sending message to conversation", e)
+                callback?.invoke(false, e.message)
+            }
+        }
+    }
 }
 ```
 

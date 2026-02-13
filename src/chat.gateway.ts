@@ -268,6 +268,23 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       `Private conversation created between ${user.username} and ${recipientUsername}`,
     );
 
+    // Notifier le destinataire en temps réel
+    const conversationData = {
+      id: conversation.id,
+      type: conversation.type,
+      name: user.username, // Pour le destinataire, le nom est l'autre utilisateur
+      createdAt: conversation.createdAt,
+      createdBy: user.username,
+    };
+
+    // Trouver le socket du destinataire s'il est connecté
+    for (const [socketId, connectedUser] of this.connectedUsers.entries()) {
+      if (connectedUser.id === recipient.id) {
+        this.server.to(socketId).emit('newConversation', conversationData);
+        break;
+      }
+    }
+
     return {
       success: true,
       conversation: {
@@ -327,6 +344,26 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     await this.conversationMemberRepository.save(members);
 
     console.log(`Group conversation "${name}" created by ${user.username}`);
+
+    // Notifier tous les membres de la nouvelle conversation
+    const conversationData = {
+      id: conversation.id,
+      type: conversation.type,
+      name: conversation.name,
+      createdAt: conversation.createdAt,
+      createdBy: user.username,
+      memberCount: members.length,
+    };
+
+    // Envoyer à tous les membres connectés (sauf le créateur)
+    for (const [socketId, connectedUser] of this.connectedUsers.entries()) {
+      if (
+        allUsers.some((u) => u.id === connectedUser.id) &&
+        connectedUser.id !== user.id
+      ) {
+        this.server.to(socketId).emit('newConversation', conversationData);
+      }
+    }
 
     return {
       success: true,
