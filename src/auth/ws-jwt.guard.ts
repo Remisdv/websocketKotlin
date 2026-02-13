@@ -3,11 +3,6 @@ import { JwtService } from '@nestjs/jwt';
 import { WsException } from '@nestjs/websockets';
 import { Socket } from 'socket.io';
 
-interface JwtPayload {
-  sub: number;
-  username: string;
-}
-
 @Injectable()
 export class WsJwtGuard implements CanActivate {
   constructor(private jwtService: JwtService) {}
@@ -24,17 +19,15 @@ export class WsJwtGuard implements CanActivate {
         throw new WsException('No token provided');
       }
 
-      const payload = this.jwtService.verify(
-        token as string,
-        {
-          secret:
-            process.env.JWT_SECRET || 'your-secret-key-change-in-production',
-        },
-      ) as JwtPayload;
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const payload = this.jwtService.verify(token as string, {
+        secret:
+          process.env.JWT_SECRET || 'your-secret-key-change-in-production',
+      });
 
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
-      (context.switchToWs().getData() as any).user = payload;
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+      context.switchToWs().getData().user = payload;
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       (client as any).user = payload;
 
       return true;

@@ -9,8 +9,9 @@ export class User {
   @Column({ unique: true })
   username: string;
 
+  // Optionnel car select: false - seulement chargé avec addSelect()
   @Column({ select: false })
-  password: string;
+  password?: string;
 
   @CreateDateColumn()
   createdAt: Date;

@@ -70,7 +70,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
-      const payload = this.jwtService.verify(token, {
+      const payload = this.jwtService.verify(token as string, {
         secret:
           process.env.JWT_SECRET || 'your-secret-key-change-in-production',
       }) as { sub: number; username: string };
