@@ -1,6 +1,5 @@
 import {
   Entity,
-  Column,
   PrimaryGeneratedColumn,
   ManyToOne,
   CreateDateColumn,
@@ -9,21 +8,18 @@ import { User } from './user.entity';
 import { Conversation } from './conversation.entity';
 
 @Entity()
-export class Message {
+export class ConversationMember {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
-  content: string;
+  @ManyToOne(() => User, { eager: true })
+  user: User;
 
-  @CreateDateColumn()
-  sentAt: Date;
-
-  @ManyToOne(() => User, (user) => user.messages)
-  sender: User;
-
-  @ManyToOne(() => Conversation, (conversation) => conversation.messages, {
-    nullable: true,
+  @ManyToOne(() => Conversation, (conversation) => conversation.members, {
+    onDelete: 'CASCADE',
   })
   conversation: Conversation;
+
+  @CreateDateColumn()
+  joinedAt: Date;
 }

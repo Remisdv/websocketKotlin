@@ -15,6 +15,8 @@ const app_controller_1 = require("./app.controller");
 const app_service_1 = require("./app.service");
 const user_entity_1 = require("./entities/user.entity");
 const message_entity_1 = require("./entities/message.entity");
+const conversation_entity_1 = require("./entities/conversation.entity");
+const conversation_member_entity_1 = require("./entities/conversation-member.entity");
 const chat_gateway_1 = require("./chat.gateway");
 let AppModule = class AppModule {
 };
@@ -28,10 +30,10 @@ exports.AppModule = AppModule = __decorate([
             typeorm_1.TypeOrmModule.forRoot({
                 type: 'sqlite',
                 database: 'messaging.db',
-                entities: [user_entity_1.User, message_entity_1.Message],
+                entities: [user_entity_1.User, message_entity_1.Message, conversation_entity_1.Conversation, conversation_member_entity_1.ConversationMember],
                 synchronize: true,
             }),
-            typeorm_1.TypeOrmModule.forFeature([user_entity_1.User, message_entity_1.Message]),
+            typeorm_1.TypeOrmModule.forFeature([user_entity_1.User, message_entity_1.Message, conversation_entity_1.Conversation, conversation_member_entity_1.ConversationMember]),
         ],
         controllers: [app_controller_1.AppController],
         providers: [app_service_1.AppService, chat_gateway_1.ChatGateway],
