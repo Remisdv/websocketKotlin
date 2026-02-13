@@ -28,10 +28,10 @@ let ChatGateway = class ChatGateway {
         this.messageRepository = messageRepository;
         this.userRepository = userRepository;
     }
-    async handleConnection(client) {
+    handleConnection(client) {
         console.log(`Client connected: ${client.id}`);
     }
-    async handleDisconnect(client) {
+    handleDisconnect(client) {
         const user = this.connectedUsers.get(client.id);
         if (user) {
             this.connectedUsers.delete(client.id);
@@ -55,7 +55,7 @@ let ChatGateway = class ChatGateway {
             order: { sentAt: 'ASC' },
             take: 50,
         });
-        client.emit('messageHistory', messages.map(msg => ({
+        client.emit('messageHistory', messages.map((msg) => ({
             id: msg.id,
             content: msg.content,
             sender: msg.sender.username,
@@ -71,7 +71,10 @@ let ChatGateway = class ChatGateway {
     async handleMessage(payload, client) {
         const user = this.connectedUsers.get(client.id);
         if (!user) {
-            return { success: false, error: 'User not authenticated. Please join first.' };
+            return {
+                success: false,
+                error: 'User not authenticated. Please join first.',
+            };
         }
         const { content } = payload;
         if (!content || content.trim() === '') {
@@ -92,7 +95,7 @@ let ChatGateway = class ChatGateway {
         return { success: true, messageId: message.id };
     }
     handleGetUsers() {
-        const users = Array.from(this.connectedUsers.values()).map(u => u.username);
+        const users = Array.from(this.connectedUsers.values()).map((u) => u.username);
         return { users };
     }
 };
